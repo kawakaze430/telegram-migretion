@@ -173,6 +173,62 @@ class SouthMovieRecovery(OfflineCase):
         media.close.assert_called_once()
         self.assertEqual(sent, [n["POSTS"][last]["caption"]])
 
+    def test_long_explicit_429_waits_then_retries_same_photo(self):
+        """The real Kaggle pause requested 474 seconds; an explicit 429 is safe to retry."""
+        n = self.nb
+        reply = lambda status, body: Mock(status_code=status, json=Mock(return_value=body))
+        session, wait = Mock(), Mock()
+        session.post.side_effect = [
+            reply(429, {"ok": False, "error_code": 429,
+                        "parameters": {"retry_after": 474}}),
+            reply(200, {"ok": True, "result": {"message_id": 88}}),
+        ]
+        client = n["Telegram"]("fixture", session, wait=wait)
+        self.assertEqual(client.call("sendPhoto", photo=("fixture.jpg", b"photo-data")), {"message_id": 88})
+        wait.assert_called_once_with(475)
+        self.assertEqual(session.post.call_count, 2)
+        self.assertIn("sendPhoto", session.post.call_args_list[0].args[0])
+        self.assertIn("sendPhoto", session.post.call_args_list[1].args[0])
+
+    def test_overlong_429_clears_pending_and_keeps_resume_safe(self):
+        """A cooldown exceeding our 15-minute ceiling must save definitive rejection, not uncertainty."""
+        n = self.nb
+        state, _ = self.from_export(include_pending=True)
+        state["bot_id"] = 42
+        session, wait = Mock(), Mock()
+        session.post.return_value = Mock(status_code=429, json=Mock(
+            return_value={"ok": False, "error_code": 429, "parameters": {"retry_after": 901}}))
+        client = n["Telegram"]("fixture", session, wait=wait)
+        media = Mock()
+        media.read.return_value = b"photo-data"
+        with self.assertRaisesRegex(n["Pause"], "Resume after 902 seconds"):
+            n["send_remaining"](state, client, media)
+        wait.assert_not_called()
+        self.assertIsNone(state["pending"])
+        self.assertEqual(len(session.post.call_args_list), 1)
+        self.assertEqual(state["resolutions"][next(reversed(state["resolutions"]))]["message_id"], 0)
+        n["DESTINATION_EXPORT"] = ""
+        restored = n["load_progress"]()
+        self.assertIsNone(restored["pending"])
+        self.assertNotIn("1569", restored["receipts"])
+
+    def test_new_checkpoint_at_2266_resumes_at_source_2712(self):
+        """A later verified checkpoint supersedes the older 1227-photo export boundary."""
+        n = self.nb
+        state, _ = self.from_export(include_pending=True)
+        state["bot_id"] = 42
+        for index, sid in enumerate(list(n["POSTS"])[:2266]):
+            if sid not in state["receipts"]:
+                n["add_receipt"](state, sid, 10000 + index, "photo")
+            state["done"][sid] = "caption"
+        n["persist"](state)
+        n["DESTINATION_EXPORT"] = ""
+        restored = n["load_progress"]()
+        self.assertEqual(n["stats"](restored)["confirmed_movie_photos"], 2266)
+        self.assertEqual(n["stats"](restored)["remaining_movie_photos"], 461)
+        self.assertEqual(next(sid for sid in n["POSTS"] if sid not in restored["receipts"]), "2712")
+        self.assertIsNone(restored["pending"])
+
     def test_source_archive_checks_photo_hash_and_movie_links(self):
         n = self.nb
         data = b"fixture-photo"
