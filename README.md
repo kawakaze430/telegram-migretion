@@ -2,16 +2,16 @@
 
 ## South Movie recovery
 
-The latest verified Kaggle run for `@southdhamal` confirmed **2,266 of 2,727 movie photos** and paused on **source 2712** after an explicit Telegram HTTP 429 flood limit requested **475 seconds**. **461 photos remain.** There was **no uncertain pending delivery** in this run; the latest checkpoint contains 2,280 receipts (including legacy non-movie entries), 12 previously deleted legacy text messages, and no manual-review items.
+**Latest verified pause:** The Kaggle run confirmed **2,441 / 2,727** movie photos (286 remaining). The last confirmed photo was **Ten Hours (2025)**, source 2895 at [destination Telegram post 2457](https://t.me/southdhamal/2457). During **Krishnavataram Part 1: The Heart (2026)** at source **2897**, the connection ended in `sendPhoto`, so the delivery is **uncertain**. The newest checkpoint has pending attempt `d203966ee25045fa9e9ff1acc44a6954`.
 
-Use **[the active South Movie recovery notebook](notebooks/south-movie/Telegram_South_Movie_Export_Recovered_Ready.ipynb)** on Kaggle with **`south_movie_verified_checkpoint.json` from the 2,266-photo saved run**, not the old 1,227-photo checkpoint or the embedded 248-message export. Attach the newest `results.zip` as notebook input only if its JSON is extracted as an input file; the notebook searches `/kaggle/input/**/*.json` for that exact checkpoint filename.
+Use the [active South Movie recovery notebook](notebooks/south-movie/Telegram_South_Movie_Export_Recovered_Ready.ipynb) together with **`south_movie_verified_checkpoint.json` from the run that confirmed 2,441 photos**. Extract the checkpoint from its Kaggle `results (2).zip` or attach it as Kaggle Input. Do not use the older 2,266-, 1,227-, or 248-photo checkpoint after later uploads.
 
-1. For a read-only validation, set `RUN_MODE = "PREVIEW"` and verify **2,266 confirmed**, **461 remaining**, and **source 2712** next. The notebook defaults to `REPAIR_AND_CONTINUE` for live operation; no manual setting change is needed after that check.
-2. Keep Internet on, the original `TELEGRAM_BOT_TOKEN` Kaggle secret enabled, and exactly one uploader running.
-3. The live uploader now handles explicit Telegram HTTP 429 cooldowns up to **900 seconds** (plus a one-second safety margin), retries the same rejected photo, and still pauses safely on ambiguous disconnects or 5xx responses. A cooldown longer than 900 seconds or repeated rejections still pauses with the latest checkpoint saved.
-4. After each run, retain its newly generated `south_movie_verified_checkpoint.json` from `/kaggle/working`. **Never re-run with an older checkpoint after more photos were uploaded**: doing so can duplicate posts.
+For the pending photo, choose **one** of these verifiable paths:
 
-The full Telegram Desktop `result.json` fallback only reconstructs the earlier 1,227-photo boundary. Use the new checkpoint for all later progress.
+1. **Recommended:** Export **all messages** from the destination channel `@southdhamal` using Telegram Desktop's JSON export **after the failure**, and attach its current `result.json` alongside the latest checkpoint in Kaggle Input. The notebook verifies **every previously confirmed photo and Telegram message ID** and resolves the single pending photo only if the entire export matches. A stale or mismatching export stops before new posts.
+2. **Manual alternative:** Inspect the destination channel after Telegram post 2457. If **Krishnavataram** is already there, put its exact Telegram post link in `PENDING_MESSAGE_ID`; if it is definitely absent, set integer `PENDING_MESSAGE_ID = 0`. `PENDING_KEY` is already set to `d203966ee25045fa9e9ff1acc44a6954`. The notebook **defaults to `PENDING_MESSAGE_ID = None`** and refuses to guess.
+
+Run `RUN_MODE = "PREVIEW"` to validate the checkpoint without posting. For a live run, use `RUN_MODE = "REPAIR_AND_CONTINUE"`, enable Internet and the original `TELEGRAM_BOT_TOKEN` Kaggle secret, and run exactly one uploader at a time. After every run, keep its **new** `south_movie_verified_checkpoint.json`. Telegram explicitly rejected 429 responses can be retried after their cooldown (up to 900 seconds); ambiguous network errors and HTTP 5xx during `sendPhoto` still stop deliberately to avoid duplicates. GitHub Actions tests are **offline simulations**, not verification of live Telegram delivery.
 
 | Notebook collection | Contents |
 | --- | --- |
