@@ -93,6 +93,8 @@ class SouthMovieRecovery(OfflineCase):
         n = self.nb
         state, _ = self.from_export()
         state["bot_id"] = 42  # A live run binds the verified bot before persisting.
+        # Explicitly resolve the earlier synthetic Annapoorani attempt; the live default is now source 2897.
+        n.update(PENDING_KEY=ATTEMPT, PENDING_MESSAGE_ID=0)
         n["resolve_pending"](state)
         session = Mock()
         def disconnect(*args, **kwargs):
