@@ -1,5 +1,7 @@
+import hashlib
 import json
-from unittest.mock import Mock
+import zipfile
+from unittest.mock import Mock, patch
 
 import requests
 
@@ -129,6 +131,75 @@ class SouthMovieRecovery(OfflineCase):
                 data["messages"][-1]["id"] = data["messages"][-2]["id"]
             with self.subTest(change=change), self.assertRaises(n["Pause"]):
                 n["state_from_export"](data, 42)
+
+    def test_final_photo_completes_once_through_notebook_entry_point(self):
+        n = self.nb
+        state, _ = self.from_export(include_pending=True)
+        state["bot_id"] = 42
+        last = list(n["POSTS"])[-1]
+        for index, sid in enumerate(n["POSTS"]):
+            if sid != last and sid not in state["receipts"]:
+                n["add_receipt"](state, sid, 20000 + index, "photo")
+                state["done"][sid] = "caption"
+        n["persist"](state)
+        media, session = Mock(), Mock()
+        media.read.return_value = b"fixture-photo"
+        sent = []
+
+        def reply(url, **kwargs):
+            method = url.rsplit("/", 1)[-1]
+            results = {
+                "getMe": {"id": 42, "username": "fixture"},
+                "getChat": {"id": n["CHAT_ID"], "type": "channel", "username": "southdhamal", "title": "South Movie"},
+                "getChatMember": {"status": "administrator", "can_post_messages": True},
+                "sendPhoto": {"message_id": 90001, "chat": {"id": n["CHAT_ID"]}, "photo": [{"file_id": "fixture"}]},
+            }
+            if method == "sendPhoto":
+                sent.append(kwargs["data"]["caption"])
+            return Mock(status_code=200, json=Mock(return_value={"ok": True, "result": results[method]}))
+
+        session.post.side_effect = reply
+        settings = {"RUN_MODE": "REPAIR_AND_CONTINUE", "DESTINATION_EXPORT": "",
+                    "bot_token": lambda: "fixture", "open_source": Mock(return_value=media)}
+        with patch.dict(n, settings), patch("requests.Session") as new_session:
+            new_session.return_value.__enter__.return_value = session
+            for _ in range(2):  # Restart from the completed checkpoint.
+                summary = n["execute"]()
+                self.assertEqual(summary["status"], "COMPLETE", summary.get("reason"))
+                self.assertEqual(summary["confirmed_movie_photos"], 2727)
+                self.assertEqual(summary["remaining_movie_photos"], 0)
+                self.assertIsNone(summary["pending"])
+            n["open_source"].assert_called_once()
+        media.close.assert_called_once()
+        self.assertEqual(sent, [n["POSTS"][last]["caption"]])
+
+    def test_source_archive_checks_photo_hash_and_movie_links(self):
+        n = self.nb
+        data = b"fixture-photo"
+        url = "https://example.org/watch/1080"
+        rel = "photos/fixture.jpg"
+        post = {"source_id": 1568, "path": rel, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest(),
+                "caption": "Fixture 1080p: " + url}
+        path = self.work / "source.zip"
+        for case in ("valid", "changed photo", "changed link", "wrong snapshot"):
+            target = url + "/different" if case == "changed link" else url
+            raw = json.dumps({"messages": [{"id": 1568, "type": "message", "photo": rel,
+                                           "text_entities": [{"type": "link", "text": target}]}]}).encode()
+            blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+            with zipfile.ZipFile(path, "w") as output:
+                output.writestr("snapshot/result.json", raw)
+                output.writestr("snapshot/" + rel, data[::-1] if case == "changed photo" else data)
+            with self.subTest(case=case), patch.dict(n, {"POSTS": {"1568": post},
+                                                          "JSON_BLOB": "" if case == "wrong snapshot" else blob}):
+                if case == "valid":
+                    archive = n["PhotoArchive"](path)
+                    try:
+                        self.assertEqual(archive.read(post), data)
+                    finally:
+                        archive.close()
+                else:
+                    with self.assertRaises(n["Pause"]):
+                        n["PhotoArchive"](path)
 
     def test_explicit_flood_wait_retries_but_server_error_is_ambiguous(self):
         n = self.nb
