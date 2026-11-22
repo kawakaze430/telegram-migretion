@@ -246,8 +246,9 @@ class SouthMovieRecovery(OfflineCase):
         self.assertEqual(n["stats"](recovered)["confirmed_movie_photos"], 2441)
         self.assertEqual(n["stats"](recovered)["remaining_movie_photos"], 286)
         self.assertIsNone(recovered["pending"])
-        self.assertEqual(recovered["resolutions"][prior["pending"]["attempt"]],
-                         {"sid": "2897", "message_id": 0})
+        self.assertEqual(recovered["resolutions"][prior["pending"]["attempt"]], {
+            "sid": "2897", "message_id": 0, "export_through_id": data["messages"][-1]["id"],
+        })
         self.assertEqual(next(sid for sid in n["POSTS"] if sid not in recovered["receipts"]), "2897")
         self.assertEqual(n["RUN_MODE"], "PREVIEW")
         self.assertIsNotNone(n["load_progress"]())
