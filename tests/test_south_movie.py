@@ -289,7 +289,9 @@ class SouthMovieRecovery(OfflineCase):
     def test_pending_2897_stale_export_reports_actual_channel_ids(self):
         n = self.nb
         _, data = self.later_pending_checkpoint()
-        data["messages"] = [m for m in data["messages"] if m["id"] <= 1243]
+        data["messages"] = [m for m in data["messages"] if m["id"] <= 250]
+        data["messages"].append({"type": "message", "id": 1243,
+                                 "photo": "photos/old.jpg", "text": "Old export ending at 1243"})
         stale = self.work / "result.json"
         stale.write_text(json.dumps(data), encoding="utf-8")
         n["DESTINATION_EXPORT"] = str(stale)
@@ -300,7 +302,9 @@ class SouthMovieRecovery(OfflineCase):
     def test_operator_can_ignore_stale_autodiscovered_export_after_verification(self):
         n = self.nb
         state, data = self.later_pending_checkpoint()
-        data["messages"] = [m for m in data["messages"] if m["id"] <= 1243]
+        data["messages"] = [m for m in data["messages"] if m["id"] <= 250]
+        data["messages"].append({"type": "message", "id": 1243,
+                                 "photo": "photos/old.jpg", "text": "Old export ending at 1243"})
         input_folder = self.work / "input"
         input_folder.mkdir(parents=True, exist_ok=True)
         (input_folder / "result.json").write_text(json.dumps(data), encoding="utf-8")
