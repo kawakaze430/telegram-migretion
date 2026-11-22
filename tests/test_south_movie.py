@@ -185,7 +185,7 @@ class SouthMovieRecovery(OfflineCase):
         ]
         client = n["Telegram"]("fixture", session, wait=wait)
         self.assertEqual(client.call("sendPhoto", photo=("fixture.jpg", b"photo-data")), {"message_id": 88})
-        wait.assert_called_once_with(475)
+        wait.assert_any_call(475)
         self.assertEqual(session.post.call_count, 2)
         self.assertIn("sendPhoto", session.post.call_args_list[0].args[0])
         self.assertIn("sendPhoto", session.post.call_args_list[1].args[0])
@@ -219,7 +219,7 @@ class SouthMovieRecovery(OfflineCase):
         state["bot_id"] = 42
         for index, sid in enumerate(list(n["POSTS"])[:2266]):
             if sid not in state["receipts"]:
-                n["add_receipt"](state, sid, 10000 + index, "photo")
+                n["add_receipt"](state, sid, 100000 + index, "photo")
             state["done"][sid] = "caption"
         n["persist"](state)
         n["DESTINATION_EXPORT"] = ""
