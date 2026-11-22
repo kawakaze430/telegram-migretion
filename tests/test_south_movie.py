@@ -58,7 +58,7 @@ class SouthMovieRecovery(OfflineCase):
         n = self.nb
         self.assertEqual(n["RUN_RESULT"]["status"], "PAUSED")  # No checkpoint attached yet.
         self.assertEqual((n["BASELINE_COUNT"], n["INTERRUPTED_SOURCE"], n["INTERRUPTED_ATTEMPT"]), (1227, "1568", ATTEMPT))
-        self.assertEqual((n["PENDING_KEY"], n["PENDING_MESSAGE_ID"]), (ATTEMPT, 0))
+        self.assertEqual((n["PENDING_KEY"], n["PENDING_MESSAGE_ID"]), ("d203966ee25045fa9e9ff1acc44a6954", None))
         posts = n["POSTS"]
         self.assertEqual(list(posts)[1226:1229], ["1567", "1568", "1569"])
         self.assertEqual(posts["1567"]["caption"].splitlines()[0], "Ombatthane Dikku (2022)")
@@ -211,6 +211,87 @@ class SouthMovieRecovery(OfflineCase):
         restored = n["load_progress"]()
         self.assertIsNone(restored["pending"])
         self.assertNotIn("1569", restored["receipts"])
+
+    def later_pending_checkpoint(self):
+        """Build an exact, synthetic 2,441-photo channel snapshot and pending source 2897."""
+        n = self.nb
+        state, _ = self.from_export(include_pending=True)
+        state["bot_id"] = 42
+        for index, sid in enumerate(list(n["POSTS"])[:2441]):
+            if sid not in state["receipts"]:
+                n["add_receipt"](state, sid, 100000 + index, "photo")
+            state["done"][sid] = "caption"
+        self.assertEqual(next(k for k in n["POSTS"] if k not in state["receipts"]), "2897")
+        attempt = "d203966ee25045fa9e9ff1acc44a6954"
+        state["pending"] = {"sid": "2897", "kind": "photo", "attempt": attempt}
+        n["persist"](state)
+        rows = []
+        for sid, row in state["receipts"].items():
+            if row["kind"] == "photo":
+                rows.append({"type": "message", "id": row["message_id"], "photo": "photos/fixture.jpg",
+                             "text": n["POSTS"][sid]["caption"] if sid in n["POSTS"] else ""})
+        rows.sort(key=lambda message: message["id"])
+        export = {"type": "public_channel", "id": 4376620825, "messages": rows}
+        return state, export
+
+    def test_pending_2897_full_export_confirms_absence_and_resumes_once(self):
+        n = self.nb
+        prior, data = self.later_pending_checkpoint()
+        target = self.work / "result.json"
+        target.write_text(json.dumps(data), encoding="utf-8")
+        n["DESTINATION_EXPORT"] = str(target)
+        recovered = n["load_progress"]()
+        self.assertEqual(n["stats"](recovered)["confirmed_movie_photos"], 2441)
+        self.assertEqual(n["stats"](recovered)["remaining_movie_photos"], 286)
+        self.assertIsNone(recovered["pending"])
+        self.assertEqual(recovered["resolutions"][prior["pending"]["attempt"]],
+                         {"sid": "2897", "message_id": 0})
+        self.assertEqual(next(sid for sid in n["POSTS"] if sid not in recovered["receipts"]), "2897")
+        self.assertEqual(n["RUN_MODE"], "PREVIEW")
+        self.assertIsNotNone(n["load_progress"]())
+        # Preview resolves in memory only; the checkpoint on disk is not mutated.
+        self.assertEqual(json.loads((self.work / n["CHECKPOINT_NAME"]).read_text())["pending"]["sid"], "2897")
+
+    def test_pending_2897_full_export_confirms_delivery_and_skips_duplicate(self):
+        n = self.nb
+        state, data = self.later_pending_checkpoint()
+        posted_id = data["messages"][-1]["id"] + 1
+        data["messages"].append({"type": "message", "id": posted_id, "photo": "photos/pending.jpg",
+                                  "text": n["POSTS"]["2897"]["caption"]})
+        target = self.work / "result.json"
+        target.write_text(json.dumps(data), encoding="utf-8")
+        n["DESTINATION_EXPORT"] = str(target)
+        recovered = n["load_progress"]()
+        self.assertEqual(recovered["receipts"]["2897"]["message_id"], posted_id)
+        self.assertEqual(recovered["done"]["2897"], "caption")
+        self.assertIsNone(recovered["pending"])
+        self.assertEqual(next(sid for sid in n["POSTS"] if sid not in recovered["receipts"]), "2898")
+
+    def test_pending_2897_stale_or_mismatched_export_is_rejected(self):
+        n = self.nb
+        state, snapshot = self.later_pending_checkpoint()
+        for scenario in ("incomplete", "wrong caption", "wrong destination", "unexpected post"):
+            data = json.loads(json.dumps(snapshot))
+            if scenario == "incomplete":
+                data["messages"].pop()
+            elif scenario == "wrong caption":
+                data["messages"][-1]["text"] = "Changed caption"
+            elif scenario == "wrong destination":
+                data["id"] = 12345
+            else:
+                data["messages"].append({"type": "message", "id": data["messages"][-1]["id"] + 2,
+                                         "photo": "photos/unexpected.jpg", "text": "Not the movie"})
+            with self.subTest(scenario=scenario), self.assertRaises(n["Pause"]):
+                n["reconcile_pending_export"](state, data)
+
+    def test_pending_2897_requires_operator_decision_without_export(self):
+        n = self.nb
+        state, _ = self.later_pending_checkpoint()
+        n["DESTINATION_EXPORT"] = ""
+        recovered = n["load_progress"]()
+        self.assertEqual(recovered["pending"]["attempt"], "d203966ee25045fa9e9ff1acc44a6954")
+        with self.assertRaisesRegex(n["Pause"], "PENDING_MESSAGE_ID"):
+            n["resolve_pending"](recovered)
 
     def test_new_checkpoint_at_2266_resumes_at_source_2712(self):
         """A later verified checkpoint supersedes the older 1227-photo export boundary."""
