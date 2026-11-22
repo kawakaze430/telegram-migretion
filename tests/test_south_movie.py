@@ -286,6 +286,37 @@ class SouthMovieRecovery(OfflineCase):
             with self.subTest(scenario=scenario), self.assertRaises(n["Pause"]):
                 n["reconcile_pending_export"](state, data)
 
+    def test_pending_2897_stale_export_reports_actual_channel_ids(self):
+        n = self.nb
+        _, data = self.later_pending_checkpoint()
+        data["messages"] = [m for m in data["messages"] if m["id"] <= 1243]
+        stale = self.work / "result.json"
+        stale.write_text(json.dumps(data), encoding="utf-8")
+        n["DESTINATION_EXPORT"] = str(stale)
+        with self.assertRaisesRegex(n["Pause"],
+                                    "STALE OR MISMATCHED DESTINATION EXPORT: it ends at Telegram ID 1243"):
+            n["load_progress"]()
+
+    def test_operator_can_ignore_stale_autodiscovered_export_after_verification(self):
+        n = self.nb
+        state, data = self.later_pending_checkpoint()
+        data["messages"] = [m for m in data["messages"] if m["id"] <= 1243]
+        input_folder = self.work / "input"
+        input_folder.mkdir(parents=True, exist_ok=True)
+        (input_folder / "result.json").write_text(json.dumps(data), encoding="utf-8")
+        n["INPUT"] = input_folder
+        n["DESTINATION_EXPORT"] = ""
+        n["PENDING_KEY"] = state["pending"]["attempt"]
+        n["PENDING_MESSAGE_ID"] = 0  # operator only sets this after verifying absence
+        restored = n["load_progress"]()
+        self.assertEqual(restored["pending"]["sid"], "2897")
+        n["resolve_pending"](restored)
+        self.assertIsNone(restored["pending"])
+        self.assertNotIn("2897", restored["receipts"])
+        self.assertEqual(restored["resolutions"][state["pending"]["attempt"]],
+                         {"sid": "2897", "message_id": 0})
+        self.assertEqual(n["stats"](restored)["remaining_movie_photos"], 286)
+
     def test_pending_2897_requires_operator_decision_without_export(self):
         n = self.nb
         state, _ = self.later_pending_checkpoint()
