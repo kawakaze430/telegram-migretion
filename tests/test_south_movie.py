@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 import requests
 
 from notebook_support import OfflineCase, SOUTH, cells, run_cell
+from run_south_movie_preview import ATTEMPT_2897, recorded_inputs
 
 CURRENT = SOUTH / "Telegram_South_Movie_Export_Recovered_Ready.ipynb"
 ATTEMPT = "d5c39ccae9404bc69dc6fa79cd21b846"
@@ -321,6 +322,91 @@ class SouthMovieRecovery(OfflineCase):
         self.assertEqual(restored["resolutions"][state["pending"]["attempt"]],
                          {"sid": "2897", "message_id": 0})
         self.assertEqual(n["stats"](restored)["remaining_movie_photos"], 286)
+
+    def test_post_2457_gap_keeps_love_birds_receipt_and_retries_only_pending_movie(self):
+        n = self.nb
+        state, export = recorded_inputs()
+        folder = self.work / "input"
+        folder.mkdir()
+        checkpoint = folder / n["CHECKPOINT_NAME"]
+        checkpoint.write_text(json.dumps(state), encoding="utf-8")
+        (folder / "result.json").write_text(json.dumps(export), encoding="utf-8")
+        summary = n["execute"]()
+        self.assertEqual(summary["status"], "PREVIEW", summary.get("reason"))
+        self.assertEqual(summary["historical_photos_missing_from_export"], {"2711": 2282})
+        self.assertEqual(summary["manual_review_items"], 1)
+        self.assertEqual(summary["next_outstanding_source"], "2897")
+        self.assertIsNone(summary["pending"])
+        self.assertEqual(json.loads(checkpoint.read_bytes()), state)
+        self.assertFalse((self.work / n["CHECKPOINT_NAME"]).exists())
+
+        resolved = n["load_progress"]()
+        self.assertEqual(resolved["resolutions"][ATTEMPT_2897]["export_through_id"], 2457)
+        self.assertEqual(resolved["receipts"], state["receipts"])
+        self.assertEqual(resolved["done"], state["done"])
+        api = Mock()
+        api.call.side_effect = n["UnknownSend"]("interrupted")
+        with self.assertRaisesRegex(n["Pause"], "2897:0"):
+            n["send_remaining"](resolved, api, Mock())
+        api.call.assert_called_once()
+        self.assertEqual(api.call.call_args.args[1]["caption"], n["POSTS"]["2897"]["caption"])
+        saved = json.loads((self.work / n["CHECKPOINT_NAME"]).read_bytes())
+        self.assertEqual(saved["export_missing_photos"], {"2711": 2282})
+        self.assertNotEqual(saved["pending"]["attempt"], ATTEMPT_2897)
+        with self.assertRaisesRegex(n["Pause"], "earlier attempt"):
+            n["load_progress"]()
+        self.assertEqual(json.loads((self.work / n["CHECKPOINT_NAME"]).read_bytes()), saved)
+
+    def test_post_2457_gap_allows_a_verified_pending_photo_and_a_later_recheck(self):
+        n = self.nb
+        state, export = recorded_inputs()
+        export["messages"].append({"type": "message", "id": 2460, "photo": "fixture.jpg",
+                                   "text": [{"type": "plain", "text": n["POSTS"]["2897"]["caption"]}]})
+        resolved = n["reconcile_pending_export"](state, export)
+        self.assertEqual(resolved["receipts"]["2897"]["message_id"], 2460)
+        self.assertEqual(resolved["resolutions"][ATTEMPT_2897], {"sid": "2897", "message_id": 2460})
+        self.assertEqual(n["stats"](resolved)["next_outstanding_source"], "2898")
+        self.assertEqual(resolved["export_missing_photos"], {"2711": 2282})
+        n["persist"](resolved)
+        export["messages"].append({"type": "message", "id": 2282, "photo": "fixture.jpg",
+                                   "text": n["POSTS"]["2711"]["caption"]})
+        export["messages"].sort(key=lambda m: m["id"])
+        path = self.work / "result.json"
+        path.write_text(json.dumps(export), encoding="utf-8")
+        n["DESTINATION_EXPORT"] = str(path)
+        rechecked = n["load_progress"]()
+        self.assertEqual(rechecked["receipts"], resolved["receipts"])
+        self.assertEqual(n["stats"](rechecked)["historical_photos_missing_from_export"], {})
+        self.assertEqual(n["stats"](rechecked)["manual_review_items"], 0)
+
+    def test_post_2457_known_gap_cannot_hide_a_second_mismatch_or_a_stale_tail(self):
+        n = self.nb
+        state, snapshot = recorded_inputs()
+        for scenario in ("another interior gap", "missing last receipt", "wrong caption", "wrong type at gap",
+                         "unexpected interior message", "pending caption differs", "two later messages"):
+            export = json.loads(json.dumps(snapshot))
+            rows = export["messages"]
+            if scenario == "another interior gap":
+                rows[:] = [m for m in rows if m["id"] != 2281]
+            elif scenario == "missing last receipt":
+                rows.pop()
+                rows.append({"type": "message", "id": 2460, "photo": "fixture.jpg", "text": n["POSTS"]["2897"]["caption"]})
+            elif scenario == "wrong caption":
+                rows[-2]["text"] = "Changed"
+            elif scenario == "wrong type at gap":
+                rows.append({"type": "service", "id": 2282})
+            elif scenario == "unexpected interior message":
+                rows.append({"type": "message", "id": 55, "text": "unexpected"})
+            elif scenario == "pending caption differs":
+                rows.append({"type": "message", "id": 2460, "photo": "fixture.jpg", "text": "Different movie"})
+            else:
+                rows.extend({"type": "message", "id": mid, "photo": "fixture.jpg", "text": n["POSTS"]["2897"]["caption"]}
+                            for mid in (2460, 2461))
+            rows.sort(key=lambda m: m["id"])
+            with self.subTest(scenario=scenario), self.assertRaises(n["Pause"]):
+                n["reconcile_pending_export"](state, export)
+            self.assertEqual(state["pending"]["attempt"], ATTEMPT_2897)
+            self.assertNotIn("2897", state["receipts"])
 
     def test_pending_2897_requires_operator_decision_without_export(self):
         n = self.nb

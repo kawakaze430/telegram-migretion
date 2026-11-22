@@ -21,7 +21,7 @@ Run `RUN_MODE = "PREVIEW"` to validate the checkpoint without posting. For a liv
 
 ## GitHub Actions
 
-Pushes, pull requests and manual runs use the same offline test command on Python 3.11, 3.12 and 3.13. Tests validate the notebooks, compile their Python code, check embedded archives, run preparation and preview cells, and exercise delivery and recovery with simulated Telegram responses. The suite uses temporary directories and synthetic checkpoints. [Open Notebook checks](https://github.com/kawakaze430/telegram-migretion/actions/workflows/notebook-checks.yml)
+Pushes, pull requests and manual runs use the same offline test command on Python 3.11, 3.12 and 3.13. Tests validate the notebooks, compile their Python code, check embedded archives, run preparation and preview cells, and exercise delivery and recovery with simulated Telegram responses. The Python 3.13 job also executes every cell of the active South Movie notebook in a Jupyter kernel for the export ending at post 2457. It reconstructs the recovery inputs and checks their receipt and caption digests against the supplied files. Its job summary shows the historical gap and the next source. The workflow uses preview mode and simulated Telegram responses. [Open Notebook checks](https://github.com/kawakaze430/telegram-migretion/actions/workflows/notebook-checks.yml)
 
 Run locally from the repository root on Linux with one of the Python versions above.
 
